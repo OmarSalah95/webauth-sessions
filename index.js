@@ -65,11 +65,14 @@ server.post('/api/login', (req, res) => {
     .where({ username })
     .first()
     .then(user => {
-      bcrypt.compareSync(password, user.password)
-        ? req.session.user = user && res.status(200).json({ message: `Hello ${user.username}` })
-        : res
+      if (bcrypt.compareSync(password, user.password)){
+        req.session.user = user;
+        res.status(200).json({ message: `Hello ${user.username}` })
+      } else{
+        res
           .status(401)
           .json({ message: 'Username or Password do not match out records' });
+      }
     })
     .catch(error => {
       res.status(500).json(error);
