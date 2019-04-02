@@ -3,13 +3,35 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
-const server = express();
+const session = require('express-session');
+const KnexSessionStore = require('connect-session-knex')(session)
 // ================= IMPORTS ================== //
-const users = require('./data/dbConfig.js');
+const db = require('./data/dbConfig.js');
+// =========SESSIONS AND COOKIES CONFIG======= //
+const sessionConfig = {
+  name: 'theme',
+  secret: 'this should actually be a envoirment variable to be used as encryptionkey',
+  cookie:{
+    maxAge: 100 * 60 * 60,
+    secure: false, // this makes it so that only HTTPS uses the cookie
+    httpOnly:true 
+  },
+  resave:false, // do not recreate new session
+  saveUnititalized: false, // GDPR
+  store: new KnexSessionStore({
+    knex: db,
+    tablename: 'sessions',
+    sidfeildname: 'sid',
+    createtable: true,
+    clearInterval: 1000 * 60 * 30
+  })
+}
 // ================= USES ================== //
+const server = express();
 server.use(helmet());
 server.use(express.json());
 server.use(cors());
+server.use(session(sessionConfig));
 // ================= ENDPOINTS ================== //
 server.get('/', (req, res) => {
   res.send('Server is active.');
@@ -20,11 +42,11 @@ server.post('/api/register', (req, res) => {
 
   req.body.password = bcrypt.hashSync(password, 10);
 
-  users('users')
+  db('users')
     .insert(req.body)
     .then(ids => {
       const id = ids[0];
-      users('users')
+      db('users')
         .where({ id })
         .first()
         .then(user => {
@@ -39,12 +61,12 @@ server.post('/api/register', (req, res) => {
 server.post('/api/login', (req, res) => {
   let { username, password } = req.body;
 
-  users('users')
+  db('users')
     .where({ username })
     .first()
     .then(user => {
       bcrypt.compareSync(password, user.password)
-        ? res.status(200).json({ message: `Hello ${user.username}` })
+        ? req.session.user = user && res.status(200).json({ message: `Hello ${user.username}` })
         : res
           .status(401)
           .json({ message: 'Username or Password do not match out records' });
@@ -55,7 +77,7 @@ server.post('/api/login', (req, res) => {
 });
 
 server.get('/api/user', restricted, (req, res) => {
-  users('users')
+  db('users')
     .then(users => {
       res.status(200).json(users);
     })
@@ -63,21 +85,9 @@ server.get('/api/user', restricted, (req, res) => {
 });
 
 function restricted(req, res, next) {
-  const { username, password } = req.headers;
-
-  username && password
-    ? users('users')
-      .where({ username })
-      .first()
-      .then(user => {
-        user && bcrypt.compareSync(password, user.password)
-          ? next()
-          : res.status(401).json({ message: 'Wrong creds' })
-      })
-      .catch(error => {
-        res.status(500).json(error);
-      })
-  : res.status(401).json({ message: 'Please enter some creds, please!' });
+  req.session && req.session.user 
+    ? next() 
+    : res.status(401).json({ message: 'Invalid Credentials' })
 }
 
 const port = process.env.PORT || 5000;
