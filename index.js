@@ -3,35 +3,14 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
-const session = require('express-session');
-const KnexSessionStore = require('connect-session-knex')(session)
+const jwt = require('jsonwebtoken')
 // ================= IMPORTS ================== //
 const db = require('./data/dbConfig.js');
-// =========SESSIONS AND COOKIES CONFIG======= //
-const sessionConfig = {
-  name: 'theme',
-  secret: 'this should actually be a envoirment variable to be used as encryptionkey',
-  cookie:{
-    maxAge: 100 * 60 * 60,
-    secure: false, // this makes it so that only HTTPS uses the cookie
-    httpOnly:true 
-  },
-  resave:false, // do not recreate new session
-  saveUnititalized: false, // GDPR
-  store: new KnexSessionStore({
-    knex: db,
-    tablename: 'sessions',
-    sidfeildname: 'sid',
-    createtable: true,
-    clearInterval: 1000 * 60 * 30
-  })
-}
 // ================= USES ================== //
 const server = express();
 server.use(helmet());
 server.use(express.json());
 server.use(cors());
-server.use(session(sessionConfig));
 // ================= ENDPOINTS ================== //
 server.get('/', (req, res) => {
   res.send('Server is active.');
@@ -66,9 +45,9 @@ server.post('/api/login', (req, res) => {
     .first()
     .then(user => {
       if (bcrypt.compareSync(password, user.password)){
-        req.session.user = user;
-        res.status(200).json({ message: `Hello ${user.username}` })
-      } else{
+        const token = generateToken(user)
+        res.status(200).json({ message: `Hello ${user.username}`, token })
+      } else {
         res
           .status(401)
           .json({ message: 'Username or Password do not match out records' });
@@ -79,6 +58,17 @@ server.post('/api/login', (req, res) => {
     });
 });
 
+const generateToken = user => {
+  const payload = {
+    subject: user.username,
+  }
+  const secret = "this is secret"
+  const options = {
+    expiresIn: '1d'
+  }
+ return jwt.sign(payload, secret, options)
+}
+
 server.get('/api/user', restricted, (req, res) => {
   db('users')
     .then(users => {
@@ -88,9 +78,14 @@ server.get('/api/user', restricted, (req, res) => {
 });
 
 function restricted(req, res, next) {
-  req.session && req.session.user 
-    ? next() 
-    : res.status(401).json({ message: 'Invalid Credentials' })
+  const token = req.headers.authorization;
+  token
+    ? jwt.verify(token, "this is secret", (err, decodedToken) => {
+        err
+          ? res.status(401).json({ message: 'Invalid Credentials' })
+          :(next(), req.decodedJWT = decodedToken)
+    })
+    : res.status(401).json({ message: 'Please provide a token' })
 }
 
 const port = process.env.PORT || 5000;
